@@ -86,23 +86,29 @@ TEACHER'S FULL ANALYSIS:
 TOOLS ALREADY CALLED:
 {json.dumps(tool_calls_made, indent=2)}
 
+The teacher's analysis may contain <think> tags with detailed reasoning. Focus on:
+1. Action sequences with <tool> tags and their arguments
+2. Verification steps mentioned after actions
+3. Critical constraints or policies that affect execution
+4. User-facing explanations that show how to communicate
+
 Extract ONLY the most relevant insights for the current stage:
 
-1. If no tools called yet: Focus on "OPTIMAL ACTION SEQUENCE" section, specifically the next 2-3 steps
-2. If some tools called: Focus on verification steps and next actions
-3. If near completion: Focus on success criteria and final verification
+1. If no tools called yet: Look for the first 2-3 <tool> calls and their setup
+2. If some tools called: Focus on next actions and verification patterns
+3. If near completion: Focus on final verification and success confirmation
 
 FORMAT YOUR RESPONSE AS:
 ```
 NEXT STEPS:
-- [Specific next action with tool name and args]
-- [Verification needed]
+- [Specific next action with tool name and exact args from the trace]
+- [Verification needed based on teacher's approach]
 
 KEY INSIGHT:
-[One critical insight from teacher's analysis]
+[One critical insight about constraints or approach]
 
 AVOID:
-[One key pitfall to avoid]
+[One key pitfall the teacher identified]
 ```
 
 Be extremely concise. Extract only what's immediately actionable."""
