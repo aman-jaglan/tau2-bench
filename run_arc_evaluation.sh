@@ -7,8 +7,8 @@ echo "Arc Teacher-Student Evaluation Pipeline"
 echo "======================================"
 
 # Configuration
-TEACHER_MODEL="gpt-4-1106-preview"  # Replace with your arc-teacher-8b
-STUDENT_MODEL="gpt-4.1-2025-04-14"  # Replace with your arc-student model
+TEACHER_MODEL="Arc-Intelligence/arc-teacher-8b"
+STUDENT_MODEL="Qwen/Qwen3-32B"
 NUM_TRIALS=4
 MAX_CONCURRENCY=10
 

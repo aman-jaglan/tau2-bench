@@ -256,7 +256,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run Teacher-Student evaluation on τ²-bench")
     parser.add_argument("--trace-file", type=Path, default="data/teacher_traces/all_traces.json",
                         help="Path to teacher thinking traces")
-    parser.add_argument("--student-llm", default="gpt-4.1-2025-04-14",
+    parser.add_argument("--student-llm", default="Qwen/Qwen3-32B",
                         help="Student model to use")
     parser.add_argument("--objective", choices=["1", "2", "3", "all"], 
                         default="all", help="Which objective to run")

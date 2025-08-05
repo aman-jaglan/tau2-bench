@@ -94,10 +94,10 @@ Runs all three objectives and compares against SOTA baselines.
 
 ### Using Your Own Models
 
-Replace model names in the scripts:
+The implementation uses:
 ```python
-TEACHER_MODEL = "arc-teacher-8b"  # Your math-trained teacher
-STUDENT_MODEL = "arc-student-4b"   # Your efficient student
+TEACHER_MODEL = "Arc-Intelligence/arc-teacher-8b"  # Arc's math-trained teacher from HuggingFace
+STUDENT_MODEL = "Qwen/Qwen3-32B"   # Qwen3-32B as the student model
 ```
 
 ### Adjusting Trace Extraction
