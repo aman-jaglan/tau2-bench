@@ -52,39 +52,42 @@ def register_custom_agents(thinking_traces: Dict[str, str]):
     global _thinking_traces
     _thinking_traces = thinking_traces
     
-    # Create agent factories that include thinking traces
-    def create_ts_solo_agent(tools, domain_policy, task, llm=None, llm_args=None):
-        return TeacherStudentSoloAgent(
-            tools=tools,
-            domain_policy=domain_policy,
-            task=task,
-            thinking_traces=_thinking_traces,
-            student_llm=llm,
-            student_llm_args=llm_args
-        )
+    # Create wrapper classes that include thinking traces
+    class TSoloAgent(TeacherStudentSoloAgent):
+        def __init__(self, tools, domain_policy, task, llm=None, llm_args=None):
+            super().__init__(
+                tools=tools,
+                domain_policy=domain_policy,
+                task=task,
+                thinking_traces=_thinking_traces,
+                student_llm=llm,
+                student_llm_args=llm_args
+            )
     
-    def create_ts_gt_agent(tools, domain_policy, task, llm=None, llm_args=None):
-        return TeacherStudentGTAgent(
-            tools=tools,
-            domain_policy=domain_policy,
-            task=task,
-            student_llm=llm,
-            student_llm_args=llm_args
-        )
+    class TGTAgent(TeacherStudentGTAgent):
+        def __init__(self, tools, domain_policy, task, llm=None, llm_args=None):
+            super().__init__(
+                tools=tools,
+                domain_policy=domain_policy,
+                task=task,
+                student_llm=llm,
+                student_llm_args=llm_args
+            )
     
-    def create_ts_hard_agent(tools, domain_policy, task, llm=None, llm_args=None):
-        return TeacherStudentHardPersonaAgent(
-            tools=tools,
-            domain_policy=domain_policy,
-            task=task,
-            student_llm=llm,
-            student_llm_args=llm_args
-        )
+    class THardAgent(TeacherStudentHardPersonaAgent):
+        def __init__(self, tools, domain_policy, task, llm=None, llm_args=None):
+            super().__init__(
+                tools=tools,
+                domain_policy=domain_policy,
+                task=task,
+                student_llm=llm,
+                student_llm_args=llm_args
+            )
     
     # Register agents
-    registry.register_agent(create_ts_solo_agent, "teacher_student_solo")
-    registry.register_agent(create_ts_gt_agent, "teacher_student_gt")
-    registry.register_agent(create_ts_hard_agent, "teacher_student_hard")
+    registry.register_agent(TSoloAgent, "teacher_student_solo")
+    registry.register_agent(TGTAgent, "teacher_student_gt")
+    registry.register_agent(THardAgent, "teacher_student_hard")
     
     logger.info("Registered custom teacher-student agents")
 
