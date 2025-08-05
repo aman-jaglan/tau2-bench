@@ -134,8 +134,19 @@ def main():
     # Get domain policy and tools
     env_constructor = registry.get_env_constructor(args.domain)
     env = env_constructor(solo_mode=True)
-    domain_policy = env.get_info().policy
-    tools = [tool.name for tool in env.tools]
+    domain_policy = env.get_policy()
+    
+    # Get tools using the proper method
+    tools = env.get_tools()
+    # For solo mode, also get user tools if available
+    try:
+        user_tools = env.get_user_tools() if hasattr(env, 'get_user_tools') else []
+        all_tools = tools + user_tools
+    except:
+        all_tools = tools
+    
+    # Extract tool names
+    tool_names = [tool.name for tool in all_tools]
     
     # Filter for solo-compatible tasks
     solo_tasks = [task for task in tasks if LLMSoloAgent.check_valid_task(task)]
@@ -155,7 +166,7 @@ def main():
             trace_data = generate_thinking_trace_for_task(
                 task=task,
                 domain_policy=domain_policy,
-                tools=tools,
+                tools=tool_names,
                 teacher_model=args.teacher_model
             )
             results.append(trace_data)
