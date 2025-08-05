@@ -53,6 +53,7 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
         self.current_trace = thinking_traces.get(task.id, "")
         self.trace_extraction_llm = trace_extraction_llm or student_llm
         self.extracted_insights = None
+        self.initial_analysis_done = False  # Track if we've done initial analysis
         
         # Now call parent init
         super().__init__(
@@ -63,55 +64,32 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
             llm_args=student_llm_args
         )
         
-    def extract_relevant_insights(self, current_state: List[Message]) -> str:
-        """Extract only the most relevant parts of the thinking trace."""
+    def extract_comprehensive_plan(self) -> str:
+        """Extract a comprehensive execution plan from teacher trace ONCE."""
         
         if not self.current_trace:
             return ""
         
-        # Build context from current conversation state
-        tool_calls_made = []
-        for msg in current_state:
-            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    tool_calls_made.append(f"{tc.name}({json.dumps(tc.arguments)})")
-        
-        extraction_prompt = f"""You are helping extract the most relevant insights from a teacher's analysis.
+        extraction_prompt = f"""Analyze this teacher's approach and create YOUR OWN execution strategy.
 
-CURRENT TICKET: {self.task.ticket}
+TASK: {self.task.ticket}
 
-TEACHER'S FULL ANALYSIS:
+TEACHER'S ANALYSIS:
 {self.current_trace}
 
-TOOLS ALREADY CALLED:
-{json.dumps(tool_calls_made, indent=2)}
+Create a comprehensive strategy that:
+1. Identifies all the issues that need to be addressed
+2. Determines the logical order of operations
+3. Plans verification steps
+4. Considers potential failures and alternatives
 
-The teacher's analysis may contain <think> tags with detailed reasoning. Focus on:
-1. Action sequences with <tool> tags and their arguments
-2. Verification steps mentioned after actions
-3. Critical constraints or policies that affect execution
-4. User-facing explanations that show how to communicate
+Be thorough but efficient. Think critically about the teacher's approach - what makes sense and what could be improved?
 
-Extract ONLY the most relevant insights for the current stage:
-
-1. If no tools called yet: Look for the first 2-3 <tool> calls and their setup
-2. If some tools called: Focus on next actions and verification patterns
-3. If near completion: Focus on final verification and success confirmation
-
-FORMAT YOUR RESPONSE AS:
-```
-NEXT STEPS:
-- [Specific next action with tool name and exact args from the trace]
-- [Verification needed based on teacher's approach]
-
-KEY INSIGHT:
-[One critical insight about constraints or approach]
-
-AVOID:
-[One key pitfall the teacher identified]
-```
-
-Be extremely concise. Extract only what's immediately actionable."""
+Structure your response to cover:
+- Problem breakdown
+- Execution sequence
+- Verification approach
+- Contingency planning"""
 
         response = generate(
             model=self.trace_extraction_llm,
@@ -125,9 +103,10 @@ Be extremely concise. Extract only what's immediately actionable."""
     def system_prompt(self) -> str:
         """Override system prompt to include selective trace insights."""
         
-        # Extract relevant insights based on current state
-        if self.extracted_insights is None and self.current_trace:
-            self.extracted_insights = self.extract_relevant_insights([])
+        # Extract comprehensive plan ONCE at the beginning
+        if not self.initial_analysis_done and self.current_trace:
+            self.extracted_insights = self.extract_comprehensive_plan()
+            self.initial_analysis_done = True
         
         # Build base prompt using parent's format
         agent_instruction = AGENT_SOLO_INSTRUCTION.format(
@@ -144,10 +123,10 @@ Be extremely concise. Extract only what's immediately actionable."""
         if self.extracted_insights:
             enhanced_prompt = f"""{base_prompt}
 
-## STRATEGIC INSIGHTS
+## YOUR EXECUTION STRATEGY
 {self.extracted_insights}
 
-Remember: Focus on execution. The insights above guide your decisions but don't overthink - ACT."""
+IMPORTANT: You have already analyzed the task. Now execute your plan efficiently. Avoid repeating actions that have already been completed."""
         else:
             enhanced_prompt = base_prompt
             
@@ -158,16 +137,8 @@ Remember: Focus on execution. The insights above guide your decisions but don't 
         message: Optional[ValidAgentInputMessage], 
         state: LLMAgentState
     ) -> tuple[AssistantMessage, LLMAgentState]:
-        """Generate next message with updated trace insights."""
-        
-        # Re-extract insights based on current conversation state
-        if self.current_trace and len(state.messages) > 0:
-            self.extracted_insights = self.extract_relevant_insights(state.messages)
-            # Update system prompt with new insights
-            state.system_messages = [
-                SystemMessage(role="system", content=self.system_prompt)
-            ]
-        
+        """Generate next message WITHOUT re-extracting insights."""
+        # Just execute based on the initial plan - no re-extraction
         return super().generate_next_message(message, state)
 
 
