@@ -7,8 +7,8 @@ echo "Arc Teacher-Student Evaluation Pipeline"
 echo "======================================"
 
 # Configuration
-TEACHER_MODEL="Arc-Intelligence/arc-teacher-8b"
-STUDENT_MODEL="Qwen/Qwen3-32B"
+TEACHER_MODEL="openai/arc-teacher"
+STUDENT_MODEL="openai/qwen3-student"
 NUM_TRIALS=4
 MAX_CONCURRENCY=10
 
@@ -27,6 +27,9 @@ fi
 
 # Step 2: Run all three objectives
 echo -e "\nStep 2: Running Teacher-Student evaluation..."
+echo "NOTE: Make sure your VLLM servers are running!"
+echo "Teacher server should be on port 8001"
+echo "Student server should be on port 8002"
 
 # For testing, limit to 5 tasks
 python run_teacher_student_eval.py \

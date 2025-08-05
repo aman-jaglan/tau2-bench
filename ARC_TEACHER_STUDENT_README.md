@@ -94,11 +94,19 @@ Runs all three objectives and compares against SOTA baselines.
 
 ### Using Your Own Models
 
-The implementation uses:
+The implementation uses local VLLM servers:
 ```python
-TEACHER_MODEL = "Arc-Intelligence/arc-teacher-8b"  # Arc's math-trained teacher from HuggingFace
-STUDENT_MODEL = "Qwen/Qwen3-32B"   # Qwen3-32B as the student model
+TEACHER_MODEL = "openai/arc-teacher"  # Arc teacher via VLLM on port 8001
+STUDENT_MODEL = "openai/qwen3-student"   # Qwen3-32B via VLLM on port 8002
 ```
+
+To run with local models:
+1. Start teacher server: `python start_teacher_vllm_server.py`
+2. In another terminal: `export OPENAI_API_BASE='http://localhost:8001/v1' && export OPENAI_API_KEY='dummy-key'`
+3. Generate traces: `python generate_teacher_traces.py`
+4. Stop teacher server and start student server: `python start_student_vllm_server.py`
+5. In another terminal: `export OPENAI_API_BASE='http://localhost:8002/v1' && export OPENAI_API_KEY='dummy-key'`
+6. Run evaluation: `python run_teacher_student_eval.py`
 
 ### Adjusting Trace Extraction
 

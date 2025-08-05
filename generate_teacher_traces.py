@@ -121,8 +121,8 @@ def main():
     """Generate thinking traces for all telecom tasks."""
     parser = argparse.ArgumentParser(description="Generate teacher thinking traces")
     parser.add_argument("--domain", default="telecom", help="Domain to process")
-    parser.add_argument("--teacher-model", default="Arc-Intelligence/arc-teacher-8b", 
-                        help="Teacher model to use")
+    parser.add_argument("--teacher-model", default="openai/arc-teacher", 
+                        help="Teacher model to use (use openai/arc-teacher for local VLLM)")
     parser.add_argument("--limit", type=int, help="Limit number of tasks to process")
     args = parser.parse_args()
     
