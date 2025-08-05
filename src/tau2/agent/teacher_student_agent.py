@@ -50,7 +50,17 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
         """Initialize with thinking traces."""
         # Store attributes before calling super().__init__
         self.thinking_traces = thinking_traces
+        
+        # Debug: Log task ID and available traces
+        logger.info(f"Task ID from task object: {task.id}")
+        logger.info(f"Available trace keys (first 5): {list(thinking_traces.keys())[:5]}")
+        
         self.current_trace = thinking_traces.get(task.id, "")
+        
+        if not self.current_trace:
+            logger.warning(f"No trace found for task ID: {task.id}")
+        else:
+            logger.info(f"Found trace for task ID: {task.id} (length: {len(self.current_trace)} chars)")
         
         # Now call parent init
         super().__init__(
@@ -88,7 +98,9 @@ A teacher has previously analyzed a similar task. Use their thinking to guide yo
 {self.current_trace}
 
 ## YOUR TASK
-Based on the teacher's analysis and the current ticket, execute the necessary actions efficiently. You can see all previous actions in the conversation history."""
+Important: The teacher's analysis shows a comprehensive approach, but you should focus on the specific issue in the ticket. Execute only the necessary actions to resolve the ticket requirements, then call done() immediately. Do not continue with extra diagnostic steps once the issue is resolved.
+
+Key instruction: After each action, check if the ticket requirements are met. If yes, call done() without executing additional steps from the teacher's analysis. You can see all previous actions in the conversation history."""
         else:
             enhanced_prompt = base_prompt
             

@@ -39,74 +39,68 @@ def generate_thinking_trace_for_task(
             for action in task.evaluation_criteria.actions
         ]
     
-    trace_prompt = f"""You are an expert problem solver analyzing a technical support ticket.
-Your strength is mathematical reasoning and constraint satisfaction.
+    # Create concise action string for the prompt
+    action_steps = "\n".join([
+        f"{i+1}. {action['name']}({json.dumps(action['arguments']) if action['arguments'] else ''})"
+        for i, action in enumerate(expected_actions)
+    ])
+    
+    trace_prompt = f"""You are an expert analyzing a technical support ticket.
 
 TICKET: {task.ticket}
 
-POLICY CONSTRAINTS:
-{domain_policy}
+REQUIRED ACTIONS (ground truth solution):
+{action_steps}
 
-AVAILABLE TOOLS:
-{json.dumps(tools, indent=2)}
+First, think deeply about this problem - analyze it thoroughly, consider all aspects, understand why these specific actions solve it.
 
-EXPECTED ACTIONS (for validation):
-{json.dumps(expected_actions, indent=2)}
+Then, after your analysis, generate a TEACHING that tells a student model exactly what they need to know to solve this problem.
 
-Generate a comprehensive thinking trace with the following structure:
+FORMAT YOUR RESPONSE AS:
 
-## 1. PROBLEM DECOMPOSITION
-- Core Issue: [What is fundamentally broken?]
-- Initial State: [Current system state based on ticket]
-- Target State: [What defines success?]
-- Success Criteria: [Specific measurable outcomes]
+<thinking>
+[Your comprehensive analysis - think freely and deeply about:
+- What's really wrong here?
+- Why do these specific actions fix it?
+- What order must they happen in?
+- What domain knowledge is needed?
+- Any tricky aspects to watch for?
+Take as much space as you need for thorough analysis.]
+</thinking>
 
-## 2. CONSTRAINT ANALYSIS
-- Policy Constraints: [Which policies apply?]
-- Tool Constraints: [What can/cannot be done with available tools?]
-- Sequencing Constraints: [What must happen in what order?]
-- User Constraints: [What limitations does the user have?]
+<teaching>
+## Problem Recognition
+[What symptoms in the ticket indicate this specific problem?]
 
-## 3. MATHEMATICAL REASONING
-Frame this as a constraint satisfaction problem:
-- Variables: [What can be changed?]
-- Constraints: [What rules must be satisfied?]
-- Objective: [What are we optimizing?]
-- Solution Space: [What are valid solutions?]
+## Key Insights
+[What does the student MUST understand about this problem?]
 
-## 4. OPTIMAL ACTION SEQUENCE
-For each step, provide:
-```
-Step N:
-- Tool: [exact tool name]
-- Arguments: {{exact arguments with correct types}}
-- Purpose: [why this step?]
-- Expected Result: [what changes?]
-- Verification: [how to confirm success?]
-- Failure Handling: [what if this fails?]
-```
+## Solution Path
+Step 1: {expected_actions[0]['name'] if expected_actions else 'action'}() 
+   - Why: [Core reason this must happen first]
+   - Watch for: [Any gotchas or important details]
 
-## 5. CRITICAL DECISION POINTS
-Identify key moments where the agent must make decisions:
-- Decision 1: [description] → Choose [option] because [reasoning]
-- Decision 2: [description] → Choose [option] because [reasoning]
+Step 2: [Continue for each required action]
+   - Why: [Why this follows previous step]
+   - Watch for: [Important details]
 
-## 6. EDGE CASES AND PITFALLS
-- Common Failure 1: [description] → Prevention: [strategy]
-- Common Failure 2: [description] → Prevention: [strategy]
+[Continue for all {len(expected_actions)} actions]
 
-## 7. EXECUTION HINTS
-Key insights the student model should focus on:
-- CRITICAL: [Most important thing to remember]
-- VERIFY: [What must be checked]
-- AVOID: [Common mistakes to avoid]
+## Completion Signal
+CRITICAL: After completing all actions above, you MUST call done() to signal task completion.
+This prevents infinite loops - the task is complete when the ticket requirements are met.
 
-Think step-by-step using mathematical logic and prove your solution is correct."""
+## Success Verification
+The problem is solved when: [Specific criteria from ticket]
+</teaching>
+
+The <thinking> section is for YOUR analysis.
+The <teaching> section is what the STUDENT needs to know to solve this problem successfully."""
 
     response = generate(
         model=teacher_model,
         messages=[SystemMessage(role="system", content=trace_prompt)],
-        temperature=0.1  # Low temperature for consistency
+        temperature=0.0  # Zero temperature for maximum consistency
     )
     
     return {
@@ -124,6 +118,12 @@ def main():
     parser.add_argument("--teacher-model", default="openai/arc-teacher", 
                         help="Teacher model to use (use openai/arc-teacher for local VLLM)")
     parser.add_argument("--limit", type=int, help="Limit number of tasks to process")
+    parser.add_argument("--hard-only", action="store_true", 
+                        help="Process only hard persona tasks")
+    parser.add_argument("--mms-only", action="store_true",
+                        help="Process only MMS issue tasks")
+    parser.add_argument("--output-suffix", default="", 
+                        help="Suffix for output files (e.g., '_hard' for hard-only traces)")
     args = parser.parse_args()
     
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -150,6 +150,16 @@ def main():
     
     # Filter for solo-compatible tasks
     solo_tasks = [task for task in tasks if LLMSoloAgent.check_valid_task(task)]
+    
+    # Filter for hard tasks if requested
+    if args.hard_only:
+        solo_tasks = [task for task in solo_tasks if '[PERSONA:Hard]' in task.id]
+        logger.info(f"Filtered to {len(solo_tasks)} hard persona tasks")
+    
+    # Filter for MMS tasks if requested
+    if args.mms_only:
+        solo_tasks = [task for task in solo_tasks if '[mms_issue]' in task.id]
+        logger.info(f"Filtered to {len(solo_tasks)} MMS issue tasks")
     
     if args.limit:
         solo_tasks = solo_tasks[:args.limit]
@@ -181,11 +191,14 @@ def main():
             continue
     
     # Save complete results
-    with open(OUTPUT_DIR / "all_traces.json", "w") as f:
+    output_filename = f"all_traces{args.output_suffix}.json"
+    with open(OUTPUT_DIR / output_filename, "w") as f:
         json.dump({
             "domain": args.domain,
             "teacher_model": args.teacher_model,
             "total_tasks": len(solo_tasks),
+            "hard_only": args.hard_only,
+            "mms_only": args.mms_only,
             "total_cost": total_cost,
             "traces": results
         }, f, indent=2)
