@@ -51,9 +51,6 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
         # Store attributes before calling super().__init__
         self.thinking_traces = thinking_traces
         self.current_trace = thinking_traces.get(task.id, "")
-        self.trace_extraction_llm = trace_extraction_llm or student_llm
-        self.extracted_insights = None
-        self.initial_analysis_done = False  # Track if we've done initial analysis
         
         # Now call parent init
         super().__init__(
@@ -64,49 +61,10 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
             llm_args=student_llm_args
         )
         
-    def extract_comprehensive_plan(self) -> str:
-        """Extract a comprehensive execution plan from teacher trace ONCE."""
-        
-        if not self.current_trace:
-            return ""
-        
-        extraction_prompt = f"""Analyze this teacher's approach and create YOUR OWN execution strategy.
-
-TASK: {self.task.ticket}
-
-TEACHER'S ANALYSIS:
-{self.current_trace}
-
-Create a comprehensive strategy that:
-1. Identifies all the issues that need to be addressed
-2. Determines the logical order of operations
-3. Plans verification steps
-4. Considers potential failures and alternatives
-
-Be thorough but efficient. Think critically about the teacher's approach - what makes sense and what could be improved?
-
-Structure your response to cover:
-- Problem breakdown
-- Execution sequence
-- Verification approach
-- Contingency planning"""
-
-        response = generate(
-            model=self.trace_extraction_llm,
-            messages=[SystemMessage(role="system", content=extraction_prompt)],
-            temperature=0.0
-        )
-        
-        return response.content
     
     @property
     def system_prompt(self) -> str:
-        """Override system prompt to include selective trace insights."""
-        
-        # Extract comprehensive plan ONCE at the beginning
-        if not self.initial_analysis_done and self.current_trace:
-            self.extracted_insights = self.extract_comprehensive_plan()
-            self.initial_analysis_done = True
+        """Override system prompt to include teacher trace as context."""
         
         # Build base prompt using parent's format
         agent_instruction = AGENT_SOLO_INSTRUCTION.format(
@@ -120,13 +78,17 @@ Structure your response to cover:
             ticket=self.task.ticket,
         )
         
-        if self.extracted_insights:
+        # Add teacher trace if available
+        if self.current_trace:
             enhanced_prompt = f"""{base_prompt}
 
-## YOUR EXECUTION STRATEGY
-{self.extracted_insights}
+## TEACHER'S ANALYSIS
+A teacher has previously analyzed a similar task. Use their thinking to guide your approach:
 
-IMPORTANT: You have already analyzed the task. Now execute your plan efficiently. Avoid repeating actions that have already been completed."""
+{self.current_trace}
+
+## YOUR TASK
+Based on the teacher's analysis and the current ticket, execute the necessary actions efficiently. You can see all previous actions in the conversation history."""
         else:
             enhanced_prompt = base_prompt
             
@@ -137,8 +99,7 @@ IMPORTANT: You have already analyzed the task. Now execute your plan efficiently
         message: Optional[ValidAgentInputMessage], 
         state: LLMAgentState
     ) -> tuple[AssistantMessage, LLMAgentState]:
-        """Generate next message WITHOUT re-extracting insights."""
-        # Just execute based on the initial plan - no re-extraction
+        """Generate next message using parent's logic - no special processing."""
         return super().generate_next_message(message, state)
 
 
