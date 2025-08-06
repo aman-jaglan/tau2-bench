@@ -42,7 +42,10 @@ def load_thinking_traces(trace_file: Path) -> Dict[str, List[Dict[str, Any]]]:
     # Create mapping from task_id to execution plan
     traces = {}
     for trace_data in data["traces"]:
+        # In Solo mode, the assistant can call BOTH user and assistant tools
+        # The environment automatically routes them correctly
         full_trace = trace_data["thinking_trace"]
+        
         # Extract only the teaching tag content
         if "<teaching>" in full_trace and "</teaching>" in full_trace:
             start_idx = full_trace.find("<teaching>") + len("<teaching>")
@@ -50,6 +53,8 @@ def load_thinking_traces(trace_file: Path) -> Dict[str, List[Dict[str, Any]]]:
             teaching_content = full_trace[start_idx:end_idx].strip()
             
             # Pre-process teaching content to extract execution plan
+            # This includes ALL tools (both user and assistant) 
+            # In Solo mode, the assistant calls user tools and they get auto-executed
             execution_plan = preprocess_teaching_to_execution_plan(teaching_content)
             traces[trace_data["task_id"]] = execution_plan
             logger.debug(f"Extracted execution plan for {trace_data['task_id']} ({len(execution_plan)} steps)")
@@ -185,7 +190,7 @@ def run_objective_1(args):
         agent="teacher_student_solo",
         user="dummy_user",
         llm_agent=args.student_llm,
-        llm_args_agent={"temperature": 0.0},
+        llm_args_agent={"temperature": 0.1},  # Slightly higher for better instruction following
         llm_user="gpt-4.1-2025-04-14",  # Dummy user doesn't use this
         llm_args_user={"temperature": 0.0},
         num_trials=args.num_trials,
@@ -226,7 +231,7 @@ def run_objective_2(args):
         agent="teacher_student_gt",
         user="user_simulator",
         llm_agent=args.student_llm,
-        llm_args_agent={"temperature": 0.0},
+        llm_args_agent={"temperature": 0.1},  # Slightly higher for better instruction following
         llm_user="gpt-4.1-2025-04-14",
         llm_args_user={"temperature": 0.7},
         num_trials=args.num_trials,
@@ -278,7 +283,7 @@ def run_objective_3(args):
         agent="teacher_student_gt",
         user="user_simulator",
         llm_agent=args.student_llm,
-        llm_args_agent={"temperature": 0.0},
+        llm_args_agent={"temperature": 0.1},  # Slightly higher for better instruction following
         llm_user="gpt-4.1-2025-04-14",
         llm_args_user={"temperature": 0.7},
         num_trials=args.num_trials,
@@ -299,7 +304,7 @@ def run_objective_3(args):
         agent="teacher_student_hard",  # Use special hard persona agent
         user="user_simulator",
         llm_agent=args.student_llm,
-        llm_args_agent={"temperature": 0.0},
+        llm_args_agent={"temperature": 0.1},  # Slightly higher for better instruction following
         llm_user="gpt-4.1-2025-04-14",
         llm_args_user={"temperature": 0.7},
         num_trials=args.num_trials,
@@ -336,7 +341,7 @@ def main():
                         help="Student model to use (use openai/qwen3-student for local VLLM)")
     parser.add_argument("--objective", choices=["1", "2", "3", "all"], 
                         default="all", help="Which objective to run")
-    parser.add_argument("--num-trials", type=int, default=4,
+    parser.add_argument("--num-trials", type=int, default=1,
                         help="Number of trials per task")
     parser.add_argument("--num-tasks", type=int, 
                         help="Limit number of tasks (for testing)")

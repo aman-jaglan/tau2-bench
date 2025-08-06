@@ -11,13 +11,13 @@ import time
 def start_student_server():
     """Start VLLM server for the student model."""
     
-    print("Starting VLLM server for Qwen/Qwen3-32B...")
+    print("Starting VLLM server for Qwen/Qwen3-8B...")
     print("Using 2xH100 GPUs with 32k context window")
     
     # VLLM command with proper settings for H100s and Qwen3
     cmd = [
         "python", "-m", "vllm.entrypoints.openai.api_server",
-        "--model", "Qwen/Qwen3-32B",
+        "--model", "Qwen/Qwen3-8B",
         "--port", "8002",  # Student on port 8002
         "--max-model-len", "32768",  # 32k context
         "--gpu-memory-utilization", "0.95",  # Use most of GPU memory

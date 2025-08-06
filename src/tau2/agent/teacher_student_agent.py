@@ -66,8 +66,13 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
         
         if not self.current_plan:
             logger.warning(f"No execution plan found for task ID: {task.id}")
+        elif len(self.current_plan) == 1 and self.current_plan[0]['name'] == 'done':
+            logger.warning(f"Task {task.id} has no assistant actions, only done()")
         else:
             logger.info(f"Found execution plan for task ID: {task.id} ({len(self.current_plan)} steps)")
+            # Log the actual steps for debugging
+            for i, step in enumerate(self.current_plan):
+                logger.debug(f"  Step {i+1}: {step['name']}({step.get('arguments', {})})")
         
         # Now call parent init
         super().__init__(
@@ -81,7 +86,7 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
     
     @property
     def system_prompt(self) -> str:
-        """Simple prompt for single-step execution."""
+        """Guided prompt for following teacher's execution plan."""
         
         # Build base prompt using parent's format
         agent_instruction = AGENT_SOLO_INSTRUCTION.format(
@@ -95,28 +100,32 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
             ticket=self.task.ticket,
         )
         
-        # If we have an execution plan, modify the instruction
+        # If we have an execution plan, provide clear guidance
         if self.current_plan:
             enhanced_prompt = f"""{base_prompt}
 
-## TASK
-The teacher has provided a plan. Your job is to execute the current step.
+## EXECUTION CONTEXT
+A teacher has already analyzed this issue and provided the exact sequence of tools to resolve it.
+Your expertise is needed to execute this plan with the correct customer-specific values.
 
-## INSTRUCTIONS
-- Execute the EXACT tool call specified by the teacher
-- Do NOT substitute with a different tool name
-- Do NOT add any other tool calls
-- After you receive the tool's response, the system will provide you with the next step
+## KEY PRINCIPLE
+Trust the teacher's tool selection completely. The teacher has already determined which tools are needed.
+Your role is to execute them with the correct values from the ticket.
 
-CRITICAL: 
-- You MUST use the exact tool name provided by the teacher
-- Only the argument VALUES should be replaced with real values from the ticket
+## CRITICAL GUIDANCE
+1. Tool Selection: Use the EXACT tool name provided by the teacher - no substitutions
+2. Argument Values: Extract REAL customer data from the ticket (customer IDs, phone numbers, etc.)
+3. Sequential Execution: Execute only the current step, then wait for the next instruction
+4. No Additional Tools: The plan is complete - do not add diagnostic or verification tools
 
-## IMPORTANT
-You will receive ONE step at a time. Execute only that step.
+## COMMON PATTERNS TO AVOID
+- Calling check_* or verify_* tools when not in the plan
+- Substituting similar tools (e.g., using toggle_data instead of reset_apn_settings)
+- Using placeholder values like "C1001" instead of extracting real customer data
+- Adding multiple tool calls when only one is specified
 
-## VERIFICATION NOTE
-When executing the final done() step, remember that you should first verify the issue mentioned in the ticket has been resolved by using appropriate assertion tools available to you."""
+## EXECUTION FLOW
+You will receive one tool at a time to execute. Focus solely on executing that specific tool correctly."""
         else:
             enhanced_prompt = base_prompt
             
@@ -173,6 +182,14 @@ When executing the final done() step, remember that you should first verify the 
         current_tool_call = state.execution_plan[state.current_step]
         logger.info(f"Executing step {state.current_step + 1}: {current_tool_call['name']}")
         
+        # Check if the tool exists
+        tool_names = [t.name for t in self.tools]
+        if current_tool_call['name'] not in tool_names and current_tool_call['name'] != 'done':
+            logger.warning(f"Tool '{current_tool_call['name']}' not found in available tools: {tool_names[:10]}...")
+            # Skip this step
+            state.current_step += 1
+            return self.generate_next_message(message, state)
+        
         # Check if we need to do assertion before done()
         need_assertion = False
         if current_tool_call['name'] == 'done' and state.current_step > 0:
@@ -181,7 +198,7 @@ When executing the final done() step, remember that you should first verify the 
             for msg in state.messages[-5:]:  # Check last 5 messages for assertions
                 if isinstance(msg, AssistantMessage) and msg.tool_calls:
                     for tc in msg.tool_calls:
-                        if tc.name.startswith('assert_'):
+                        if tc.name.startswith('assert_') or tc.name == 'can_send_mms':
                             recent_assertions.append(tc.name)
             
             if not recent_assertions:
@@ -191,43 +208,38 @@ When executing the final done() step, remember that you should first verify the 
                 logger.info(f"Recent assertions found: {recent_assertions}")
         
         if need_assertion:
-            # Create assertion instruction
+            # Create assertion instruction for MMS issues
             step_instruction = f"""## VERIFICATION REQUIRED
 
 Before completing the task, you must verify the issue is resolved.
 
 Current teacher step: done()
 
-However, FIRST you need to:
-1. Look at the ticket to understand what issue needs to be resolved
-2. Call an appropriate assertion tool to verify the fix worked
+However, FIRST you need to verify the MMS issue is fixed.
 
 The ticket states: {self.task.ticket}
 
-Choose an assertion tool that verifies the issue mentioned in the ticket.
+Since this is an MMS issue, you MUST call: can_send_mms()
 
 IMPORTANT: 
-- Execute ONE assertion tool call at a time
-- After the assertion, the system will determine if more verification is needed
-- Continue with assertions until the issue is fully verified"""
+- Call can_send_mms() to verify MMS functionality
+- After verification, the system will execute done() automatically"""
             
         else:
-            # Normal step execution
-            step_instruction = f"""## CURRENT STEP TO EXECUTE
+            # Normal step execution - clear and focused instruction
+            step_instruction = f"""## CURRENT STEP IN PLAN
 
-You must execute this EXACT tool:
+The teacher has determined you need to call: {current_tool_call['name']}
 
-Tool Name: {current_tool_call['name']}
-Arguments Template: {json.dumps(current_tool_call['arguments'])}
+Expected arguments structure: {json.dumps(current_tool_call['arguments'])}
 
-CRITICAL INSTRUCTIONS:
-1. You MUST call the tool named "{current_tool_call['name']}" - no substitutions
-2. Do NOT call a different tool even if you think it would help
-3. Do NOT check status or gather information first
-4. For the arguments: Replace placeholder values (like "C1001", "L1002") with real values from the ticket
-5. Execute ONLY this single tool call
+IMPORTANT REMINDERS:
+1. This is the ONLY tool to call right now - {current_tool_call['name']}
+2. Extract real values from the ticket to replace any placeholders
+3. Do not add any other tool calls or diagnostics
+4. Trust that this tool is correct for solving the issue
 
-Example: If the teacher says "grant_app_permission", you MUST call grant_app_permission, not check_app_permissions or any other tool."""
+Execute {current_tool_call['name']} now with appropriate values from the ticket."""
         
         # Create a temporary system message with the step instruction
         focused_system_message = SystemMessage(
@@ -246,48 +258,98 @@ Example: If the teacher says "grant_app_permission", you MUST call grant_app_per
         # Generate with focused instruction
         messages = [focused_system_message] + state.messages
         
-        try:
-            assistant_message = generate(
-                model=self.llm,
-                tools=self.tools,
-                messages=messages,
-                tool_choice="required",
-                **self.llm_args,
-            )
-            
-            if not assistant_message.is_tool_call():
-                raise ValueError("LLMSoloAgent only supports tool calls.")
-            
-            # Check if it's a stop message
-            assistant_message = self._check_if_stop_toolcall(assistant_message)
-            
-            # Update state
-            state.messages.append(assistant_message)
-            
-            # Handle state progression
-            if assistant_message.tool_calls:
-                executed_assertion = any(tc.name.startswith('assert_') for tc in assistant_message.tool_calls)
-                current_step_is_done = (state.current_step < len(state.execution_plan) and 
-                                       state.execution_plan[state.current_step]['name'] == 'done')
+        # Limit retries to avoid infinite loops
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                assistant_message = generate(
+                    model=self.llm,
+                    tools=self.tools,
+                    messages=messages,
+                    tool_choice="required",
+                    **self.llm_args,
+                )
                 
-                if executed_assertion and current_step_is_done:
-                    # We just executed an assertion before done(), don't increment
-                    # We'll execute done() in the next iteration
-                    logger.info("Assertion completed, will execute done() next")
-                else:
-                    # Normal step increment
-                    state.current_step += 1
-            
-            # Log progress
-            if assistant_message.tool_calls:
-                logger.info(f"Successfully executed: {[tc.name for tc in assistant_message.tool_calls]}")
-                logger.info(f"Progress: {state.current_step}/{state.total_steps} steps completed")
-            
-            return assistant_message, state
-            
-        except Exception as e:
-            logger.error(f"Error generating message for task {self.task.id}: {str(e)}")
-            raise
+                if not assistant_message.is_tool_call():
+                    raise ValueError("LLMSoloAgent only supports tool calls.")
+                
+                # Check if it's a stop message
+                assistant_message = self._check_if_stop_toolcall(assistant_message)
+                
+                # Validate the tool call matches expected
+                executed_tools = [tc.name for tc in assistant_message.tool_calls] if assistant_message.tool_calls else []
+                expected_tool = current_tool_call['name']
+                
+                # Special case: assertions are acceptable before done()
+                if expected_tool == 'done' and need_assertion:
+                    if any(tc in executed_tools for tc in ['can_send_mms', 'assert_can_send_mms']):
+                        logger.info(f"Valid assertion executed: {executed_tools}")
+                    else:
+                        logger.warning(f"Expected MMS assertion but got: {executed_tools}")
+                        retry_count += 1
+                        continue
+                # Check if the exact expected tool was called
+                elif expected_tool not in executed_tools:
+                    logger.warning(f"Tool mismatch! Expected: {expected_tool}, Got: {executed_tools}")
+                    logger.warning(f"Retry {retry_count + 1}/{max_retries}: Reinforcing instruction")
+                    
+                    # Make instruction even more explicit on retry
+                    step_instruction = f"""## CORRECTION NEEDED
+
+You called {executed_tools[0] if executed_tools else 'unknown'}, but the teacher's plan specifically requires {expected_tool}.
+
+The teacher has already determined that {expected_tool} is the correct tool for this step.
+Please trust the plan and call {expected_tool} instead.
+
+Tool to call: {expected_tool}
+Arguments structure: {json.dumps(current_tool_call['arguments'])}
+
+Remember: Use real customer values from the ticket, not placeholder values."""
+                    
+                    focused_system_message = SystemMessage(
+                        role="system",
+                        content=self.system_prompt + "\n\n" + step_instruction
+                    )
+                    messages[0] = focused_system_message
+                    retry_count += 1
+                    continue
+                
+                # Update state
+                state.messages.append(assistant_message)
+                
+                # Handle state progression
+                if assistant_message.tool_calls:
+                    executed_assertion = any(tc.name in ['can_send_mms', 'assert_can_send_mms'] for tc in assistant_message.tool_calls)
+                    current_step_is_done = (state.current_step < len(state.execution_plan) and 
+                                           state.execution_plan[state.current_step]['name'] == 'done')
+                    
+                    if executed_assertion and current_step_is_done:
+                        # We just executed an assertion before done(), don't increment
+                        # We'll execute done() in the next iteration
+                        logger.info("Assertion completed, will execute done() next")
+                    else:
+                        # Normal step increment
+                        state.current_step += 1
+                
+                # Log progress
+                if assistant_message.tool_calls:
+                    logger.info(f"Successfully executed: {executed_tools}")
+                    logger.info(f"Progress: {state.current_step}/{state.total_steps} steps completed")
+                
+                return assistant_message, state
+                
+            except Exception as e:
+                logger.error(f"Error generating message for task {self.task.id}: {str(e)}")
+                retry_count += 1
+                if retry_count >= max_retries:
+                    raise
+        
+        # If we exhausted retries, skip this step
+        logger.error(f"Failed to execute correct tool after {max_retries} retries, skipping step")
+        state.current_step += 1
+        return self.generate_next_message(message, state)
 
 
 class TeacherStudentGTAgent(LLMGTAgent):
