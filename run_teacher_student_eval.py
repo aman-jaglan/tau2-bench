@@ -9,7 +9,7 @@ Three objectives to beat SOTA:
 import json
 from pathlib import Path
 import argparse
-from typing import Dict, List
+from typing import Dict, List, Any
 import sys
 
 from loguru import logger
