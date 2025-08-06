@@ -103,14 +103,20 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
 The teacher has provided a plan. Your job is to execute the current step.
 
 ## INSTRUCTIONS
-- Execute the SINGLE tool call that will be provided in the state
+- Execute the EXACT tool call specified by the teacher
+- Do NOT substitute with a different tool name
 - Do NOT add any other tool calls
 - After you receive the tool's response, the system will provide you with the next step
 
-CRITICAL: The teacher's argument values are examples. You must use real values from the ticket and environment.
+CRITICAL: 
+- You MUST use the exact tool name provided by the teacher
+- Only the argument VALUES should be replaced with real values from the ticket
 
 ## IMPORTANT
-You will receive ONE step at a time. Execute only that step."""
+You will receive ONE step at a time. Execute only that step.
+
+## VERIFICATION NOTE
+When executing the final done() step, remember that you should first verify the issue mentioned in the ticket has been resolved by using appropriate assertion tools available to you."""
         else:
             enhanced_prompt = base_prompt
             
@@ -167,19 +173,61 @@ You will receive ONE step at a time. Execute only that step."""
         current_tool_call = state.execution_plan[state.current_step]
         logger.info(f"Executing step {state.current_step + 1}: {current_tool_call['name']}")
         
-        # Create a focused prompt that includes only the current step
-        step_instruction = f"""## CURRENT STEP TO EXECUTE
+        # Check if we need to do assertion before done()
+        need_assertion = False
+        if current_tool_call['name'] == 'done' and state.current_step > 0:
+            # Check if we've already done any assertions in recent messages
+            recent_assertions = []
+            for msg in state.messages[-5:]:  # Check last 5 messages for assertions
+                if isinstance(msg, AssistantMessage) and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        if tc.name.startswith('assert_'):
+                            recent_assertions.append(tc.name)
+            
+            if not recent_assertions:
+                need_assertion = True
+                logger.info("Need to verify issue resolution before done()")
+            else:
+                logger.info(f"Recent assertions found: {recent_assertions}")
+        
+        if need_assertion:
+            # Create assertion instruction
+            step_instruction = f"""## VERIFICATION REQUIRED
 
-You must execute this specific tool call:
+Before completing the task, you must verify the issue is resolved.
 
-Tool: {current_tool_call['name']}
-Arguments: {json.dumps(current_tool_call['arguments'])}
+Current teacher step: done()
+
+However, FIRST you need to:
+1. Look at the ticket to understand what issue needs to be resolved
+2. Call an appropriate assertion tool to verify the fix worked
+
+The ticket states: {self.task.ticket}
+
+Choose an assertion tool that verifies the issue mentioned in the ticket.
 
 IMPORTANT: 
-- Execute ONLY this single tool call
-- Do not add any other tool calls
+- Execute ONE assertion tool call at a time
+- After the assertion, the system will determine if more verification is needed
+- Continue with assertions until the issue is fully verified"""
+            
+        else:
+            # Normal step execution
+            step_instruction = f"""## CURRENT STEP TO EXECUTE
 
-CRITICAL: The arguments shown above are examples. You must use real values from the ticket and environment."""
+You must execute this EXACT tool:
+
+Tool Name: {current_tool_call['name']}
+Arguments Template: {json.dumps(current_tool_call['arguments'])}
+
+CRITICAL INSTRUCTIONS:
+1. You MUST call the tool named "{current_tool_call['name']}" - no substitutions
+2. Do NOT call a different tool even if you think it would help
+3. Do NOT check status or gather information first
+4. For the arguments: Replace placeholder values (like "C1001", "L1002") with real values from the ticket
+5. Execute ONLY this single tool call
+
+Example: If the teacher says "grant_app_permission", you MUST call grant_app_permission, not check_app_permissions or any other tool."""
         
         # Create a temporary system message with the step instruction
         focused_system_message = SystemMessage(
@@ -215,7 +263,20 @@ CRITICAL: The arguments shown above are examples. You must use real values from 
             
             # Update state
             state.messages.append(assistant_message)
-            state.current_step += 1
+            
+            # Handle state progression
+            if assistant_message.tool_calls:
+                executed_assertion = any(tc.name.startswith('assert_') for tc in assistant_message.tool_calls)
+                current_step_is_done = (state.current_step < len(state.execution_plan) and 
+                                       state.execution_plan[state.current_step]['name'] == 'done')
+                
+                if executed_assertion and current_step_is_done:
+                    # We just executed an assertion before done(), don't increment
+                    # We'll execute done() in the next iteration
+                    logger.info("Assertion completed, will execute done() next")
+                else:
+                    # Normal step increment
+                    state.current_step += 1
             
             # Log progress
             if assistant_message.tool_calls:
