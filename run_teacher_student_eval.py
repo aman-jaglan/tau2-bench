@@ -63,7 +63,7 @@ def load_thinking_traces(trace_file: Path) -> Dict[str, str]:
 
 
 def preprocess_teaching_to_json(teaching_content: str) -> str:
-    """Convert teaching content with function calls to structured JSON format."""
+    """Convert teaching content with function calls to structured JSON format with state tracking."""
     import re
     
     # Find all Step N: entries
@@ -106,12 +106,40 @@ def preprocess_teaching_to_json(teaching_content: str) -> str:
             "arguments": {}
         })
     
-    # Create structured output
-    structured_output = "Execute these tool calls in order:\n"
-    for i, tool_call in enumerate(tool_calls):
-        structured_output += f"{i+1}. {json.dumps(tool_call)}\n"
+    # Create structured output with state tracking
+    total_steps = len(tool_calls)
     
-    structured_output += "\nIMPORTANT: Execute exactly ONE tool call per message. Wait for the tool response before proceeding to the next tool call."
+    # Build a JSON structure that includes all steps with state tracking
+    steps_structure = {
+        "total_steps": total_steps,
+        "steps": []
+    }
+    
+    for i, tool_call in enumerate(tool_calls):
+        step_info = {
+            "step_number": i + 1,
+            "tool_call": tool_call,
+            "instruction": f"Execute step {i+1} of {total_steps}"
+        }
+        steps_structure["steps"].append(step_info)
+    
+    # Create the formatted output
+    structured_output = f"""TEACHING INSTRUCTIONS - SEQUENTIAL EXECUTION REQUIRED
+
+TOTAL STEPS: {total_steps}
+
+You must execute these steps ONE AT A TIME in order:
+
+{json.dumps(steps_structure, indent=2)}
+
+CRITICAL EXECUTION RULES:
+1. Start with step 1
+2. Execute ONLY ONE tool call per message
+3. After receiving a tool response, proceed to the next step
+4. Track your progress - remember which step you just completed
+5. Only call done() when you reach the final step
+
+CURRENT INSTRUCTION: Begin with step 1"""
     
     return structured_output
 

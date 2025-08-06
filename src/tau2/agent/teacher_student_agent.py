@@ -93,14 +93,23 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
             enhanced_prompt = f"""{base_prompt}
 
 ## TEACHER'S INSTRUCTIONS
-The teacher has analyzed the problem and provided the exact tool calls needed to solve it.
-
 {self.current_trace}
 
-## YOUR TASK
-You are currently at the beginning. Execute the first tool call listed above. After receiving the tool response, you will be asked to execute the next tool call in the sequence. Continue this process until all tool calls have been executed.
+## YOUR STATE TRACKING TASK
+You are executing a sequence of steps. The teacher has provided a structured plan with numbered steps.
 
-Remember: You can only make ONE tool call per message. The framework will ask you for the next action after each tool response."""
+IMPORTANT: 
+1. Find your current step in the JSON structure above
+2. Execute ONLY the tool_call for that step number
+3. After each tool response, move to the next step number
+4. Keep track of which step you just completed
+5. When you complete the final step (which should be done()), you are finished
+
+CRITICAL: The teacher's argument values are examples. You must use real values from the ticket and environment.
+
+Example: If you just completed step 2 of 5, you should now execute step 3.
+
+Remember: ONE tool call per message. The system will call you again after each tool response."""
         else:
             enhanced_prompt = base_prompt
             
@@ -117,6 +126,14 @@ Remember: You can only make ONE tool call per message. The framework will ask yo
         logger.info(f"Number of messages in state: {len(state.messages)}")
         logger.info(f"Message type: {type(message).__name__ if message else 'None'}")
         
+        # Calculate which step we're on based on tool calls made
+        tool_calls_made = 0
+        for msg in state.messages:
+            if isinstance(msg, AssistantMessage) and msg.tool_calls:
+                tool_calls_made += len(msg.tool_calls)
+        
+        logger.info(f"Tool calls made so far: {tool_calls_made}")
+        
         # Log the full system prompt being used
         if len(state.messages) == 0:  # First message
             logger.info(f"System prompt length: {len(self.system_prompt)} chars")
@@ -124,10 +141,11 @@ Remember: You can only make ONE tool call per message. The framework will ask yo
             
             # Check for any special characters in teaching
             if self.current_trace:
-                special_chars = ['```', '"""', "'''", '\\', '\n\n\n']
-                for char in special_chars:
-                    if char in self.current_trace:
-                        logger.warning(f"Teaching contains special sequence: {repr(char)}")
+                # Extract total steps from trace
+                import re
+                total_match = re.search(r'TOTAL STEPS: (\d+)', self.current_trace)
+                if total_match:
+                    logger.info(f"Total steps to execute: {total_match.group(1)}")
         
         # Log tool availability
         logger.info(f"Available tools: {[tool.name for tool in self.tools]}")
@@ -140,6 +158,7 @@ Remember: You can only make ONE tool call per message. The framework will ask yo
             assistant_msg = result[0]
             if assistant_msg.tool_calls:
                 logger.info(f"Generated tool calls: {[tc.name for tc in assistant_msg.tool_calls]}")
+                logger.info(f"Current progress: Step {tool_calls_made + 1} executed")
             else:
                 logger.info(f"Generated content: {assistant_msg.content[:100] if assistant_msg.content else 'None'}")
             
