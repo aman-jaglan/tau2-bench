@@ -32,14 +32,14 @@ from tau2.agent.teacher_student_agent import (
     TeacherStudentHardPersonaAgent
 )
 
-def load_thinking_traces(trace_file: Path) -> Dict[str, str]:
-    """Load pre-generated thinking traces and convert to structured JSON format."""
+def load_thinking_traces(trace_file: Path) -> Dict[str, List[Dict[str, Any]]]:
+    """Load pre-generated thinking traces and convert to structured execution plans."""
     import re
     
     with open(trace_file) as f:
         data = json.load(f)
     
-    # Create mapping from task_id to trace
+    # Create mapping from task_id to execution plan
     traces = {}
     for trace_data in data["traces"]:
         full_trace = trace_data["thinking_trace"]
@@ -49,21 +49,21 @@ def load_thinking_traces(trace_file: Path) -> Dict[str, str]:
             end_idx = full_trace.find("</teaching>")
             teaching_content = full_trace[start_idx:end_idx].strip()
             
-            # Pre-process teaching content to extract function calls
-            processed_content = preprocess_teaching_to_json(teaching_content)
-            traces[trace_data["task_id"]] = processed_content
-            logger.debug(f"Extracted and processed teaching for {trace_data['task_id']} ({len(processed_content)} chars)")
+            # Pre-process teaching content to extract execution plan
+            execution_plan = preprocess_teaching_to_execution_plan(teaching_content)
+            traces[trace_data["task_id"]] = execution_plan
+            logger.debug(f"Extracted execution plan for {trace_data['task_id']} ({len(execution_plan)} steps)")
         else:
             # No teaching tag - let model work without teaching
             logger.warning(f"No teaching tag found for {trace_data['task_id']}, skipping trace")
             # Don't add to traces dict - model will work without teaching
     
-    logger.info(f"Loaded {len(traces)} thinking traces from {trace_file}")
+    logger.info(f"Loaded {len(traces)} execution plans from {trace_file}")
     return traces
 
 
-def preprocess_teaching_to_json(teaching_content: str) -> str:
-    """Convert teaching content with function calls to structured JSON format with state tracking."""
+def preprocess_teaching_to_execution_plan(teaching_content: str) -> List[Dict[str, Any]]:
+    """Convert teaching content to a structured execution plan."""
     import re
     
     # Find all Step N: entries
@@ -106,58 +106,23 @@ def preprocess_teaching_to_json(teaching_content: str) -> str:
             "arguments": {}
         })
     
-    # Create structured output with state tracking
-    total_steps = len(tool_calls)
-    
-    # Build a JSON structure that includes all steps with state tracking
-    steps_structure = {
-        "total_steps": total_steps,
-        "steps": []
-    }
-    
-    for i, tool_call in enumerate(tool_calls):
-        step_info = {
-            "step_number": i + 1,
-            "tool_call": tool_call,
-            "instruction": f"Execute step {i+1} of {total_steps}"
-        }
-        steps_structure["steps"].append(step_info)
-    
-    # Create the formatted output
-    structured_output = f"""TEACHING INSTRUCTIONS - SEQUENTIAL EXECUTION REQUIRED
+    return tool_calls
 
-TOTAL STEPS: {total_steps}
-
-You must execute these steps ONE AT A TIME in order:
-
-{json.dumps(steps_structure, indent=2)}
-
-CRITICAL EXECUTION RULES:
-1. Start with step 1
-2. Execute ONLY ONE tool call per message
-3. After receiving a tool response, proceed to the next step
-4. Track your progress - remember which step you just completed
-5. Only call done() when you reach the final step
-
-CURRENT INSTRUCTION: Begin with step 1"""
-    
-    return structured_output
-
-def register_custom_agents(thinking_traces: Dict[str, str]):
+def register_custom_agents(execution_plans: Dict[str, List[Dict[str, Any]]]):
     """Register our teacher-student agents."""
     
-    # Store traces in a way accessible to agent factories
-    global _thinking_traces
-    _thinking_traces = thinking_traces
+    # Store execution plans in a way accessible to agent factories
+    global _execution_plans
+    _execution_plans = execution_plans
     
-    # Create wrapper classes that include thinking traces
+    # Create wrapper classes that include execution plans
     class TSoloAgent(TeacherStudentSoloAgent):
         def __init__(self, tools, domain_policy, task, llm=None, llm_args=None):
             super().__init__(
                 tools=tools,
                 domain_policy=domain_policy,
                 task=task,
-                thinking_traces=_thinking_traces,
+                execution_plans=_execution_plans,
                 student_llm=llm,
                 student_llm_args=llm_args
             )
@@ -388,10 +353,10 @@ def main():
         logger.info("Please run generate_teacher_traces.py first")
         return
     
-    thinking_traces = load_thinking_traces(args.trace_file)
+    execution_plans = load_thinking_traces(args.trace_file)
     
     # Register custom agents
-    register_custom_agents(thinking_traces)
+    register_custom_agents(execution_plans)
     
     # Track results
     all_results = {}

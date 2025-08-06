@@ -31,10 +31,17 @@ from tau2.data_model.tasks import Task
 from tau2.environment.tool import Tool, as_tool
 from tau2.utils.llm_utils import generate
 
+
+class TeacherStudentAgentState(LLMAgentState):
+    """Extended state for teacher-student agent with execution plan tracking."""
+    execution_plan: Optional[List[Dict[str, Any]]] = None
+    current_step: int = 0
+    total_steps: int = 0
+
 class TeacherStudentSoloAgent(LLMSoloAgent):
     """
     Enhanced solo agent that uses teacher thinking traces.
-    Student selectively extracts relevant parts to avoid confusion.
+    Implements stateful orchestration for sequential execution.
     """
     
     def __init__(
@@ -42,25 +49,25 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
         tools: List[Tool],
         domain_policy: str,
         task: Task,
-        thinking_traces: Dict[str, str],
+        execution_plans: Dict[str, List[Dict[str, Any]]],
         student_llm: str,
         student_llm_args: Optional[dict] = None,
         trace_extraction_llm: Optional[str] = None
     ):
-        """Initialize with thinking traces."""
+        """Initialize with execution plans."""
         # Store attributes before calling super().__init__
-        self.thinking_traces = thinking_traces
+        self.execution_plans = execution_plans
         
-        # Debug: Log task ID and available traces
+        # Debug: Log task ID and available plans
         logger.info(f"Task ID from task object: {task.id}")
-        logger.info(f"Available trace keys (first 5): {list(thinking_traces.keys())[:5]}")
+        logger.info(f"Available plan keys (first 5): {list(execution_plans.keys())[:5]}")
         
-        self.current_trace = thinking_traces.get(task.id, "")
+        self.current_plan = execution_plans.get(task.id, [])
         
-        if not self.current_trace:
-            logger.warning(f"No trace found for task ID: {task.id}")
+        if not self.current_plan:
+            logger.warning(f"No execution plan found for task ID: {task.id}")
         else:
-            logger.info(f"Found trace for task ID: {task.id} (length: {len(self.current_trace)} chars)")
+            logger.info(f"Found execution plan for task ID: {task.id} ({len(self.current_plan)} steps)")
         
         # Now call parent init
         super().__init__(
@@ -74,7 +81,7 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
     
     @property
     def system_prompt(self) -> str:
-        """Override system prompt to include teacher trace as context."""
+        """Simple prompt for single-step execution."""
         
         # Build base prompt using parent's format
         agent_instruction = AGENT_SOLO_INSTRUCTION.format(
@@ -88,121 +95,133 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
             ticket=self.task.ticket,
         )
         
-        # Add teacher trace if available
-        if self.current_trace:
+        # If we have an execution plan, modify the instruction
+        if self.current_plan:
             enhanced_prompt = f"""{base_prompt}
 
-## TEACHER'S INSTRUCTIONS
-{self.current_trace}
+## TASK
+The teacher has provided a plan. Your job is to execute the current step.
 
-## YOUR STATE TRACKING TASK
-You are executing a sequence of steps. The teacher has provided a structured plan with numbered steps.
+## INSTRUCTIONS
+- Execute the SINGLE tool call that will be provided in the state
+- Do NOT add any other tool calls
+- The teacher's argument values are placeholders - use real values from the ticket
+- After you receive the tool's response, the system will provide you with the next step
 
-IMPORTANT: 
-1. Find your current step in the JSON structure above
-2. Execute ONLY the tool_call for that step number
-3. After each tool response, move to the next step number
-4. Keep track of which step you just completed
-5. When you complete the final step (which should be done()), you are finished
-
-CRITICAL: The teacher's argument values are examples. You must use real values from the ticket and environment.
-
-Example: If you just completed step 2 of 5, you should now execute step 3.
-
-Remember: ONE tool call per message. The system will call you again after each tool response.
-
-## CRITICAL EXECUTION RULES
-
-YOU MUST FOLLOW THESE RULES OR THE TASK WILL FAIL:
-
-1. **ONE TOOL PER MESSAGE - NO EXCEPTIONS**
-   - You see: ["function_A", "function_B"] 
-   - You do: First message: function_A
-            Second message: function_B
-   - NEVER: Both in one message ❌
-   
-2. **WHEN YOU SEE STEP 1, DO STEP 1**
-   - Don't look ahead to step 2 yet
-   - Don't try to be smart and combine steps
-   - Just execute the current step
-   
-3. **TRACK YOUR PROGRESS**
-   Look at your step number:
-   - Just did step 1? → Now do step 2
-   - Just did step 2? → Now do step 3
-   - At final step (done)? → Execute it and stop
-
-4. **NO OPTIMIZATION ALLOWED**
-   - Do NOT try to be efficient by batching calls
-   - Do NOT skip steps to save time
-   - Execute exactly as instructed, one step at a time
-
-EXAMPLE OF CORRECT EXECUTION:
-- Message 1: Execute step 1 tool call
-- Receive response
-- Message 2: Execute step 2 tool call
-- Receive response
-- Message 3: Execute step 3 tool call (done)
-
-EXAMPLE OF INCORRECT EXECUTION (WILL FAIL):
-- Message 1: Execute steps 1 AND 2 together ❌
-- Message 1: Skip to done() ❌
-- Message 1: Execute same step repeatedly ❌
-
-THE SYSTEM WILL REJECT MULTIPLE TOOL CALLS. YOU MUST DO ONE AT A TIME."""
+## IMPORTANT
+You will receive ONE step at a time. Execute only that step."""
         else:
             enhanced_prompt = base_prompt
             
         return enhanced_prompt
     
+    def get_init_state(
+        self, message_history: Optional[list[Message]] = None
+    ) -> TeacherStudentAgentState:
+        """Get the initial state with execution plan."""
+        if message_history is None:
+            message_history = []
+        
+        # Initialize the extended state
+        state = TeacherStudentAgentState(
+            system_messages=[SystemMessage(role="system", content=self.system_prompt)],
+            messages=message_history,
+            execution_plan=self.current_plan,
+            current_step=0,
+            total_steps=len(self.current_plan)
+        )
+        
+        return state
+    
     def generate_next_message(
         self, 
         message: Optional[ValidAgentInputMessage], 
-        state: LLMAgentState
-    ) -> tuple[AssistantMessage, LLMAgentState]:
-        """Generate next message using parent's logic - no special processing."""
-        # Log the state before generating
+        state: TeacherStudentAgentState
+    ) -> tuple[AssistantMessage, TeacherStudentAgentState]:
+        """Generate next message with stateful orchestration."""
+        
+        # Log the current state
         logger.info(f"=== GENERATING MESSAGE FOR TASK: {self.task.id} ===")
+        logger.info(f"Current step: {state.current_step} / {state.total_steps}")
         logger.info(f"Number of messages in state: {len(state.messages)}")
-        logger.info(f"Message type: {type(message).__name__ if message else 'None'}")
         
-        # Calculate which step we're on based on tool calls made
-        tool_calls_made = 0
-        for msg in state.messages:
-            if isinstance(msg, AssistantMessage) and msg.tool_calls:
-                tool_calls_made += len(msg.tool_calls)
+        # If no execution plan, fall back to normal behavior
+        if not state.execution_plan or state.total_steps == 0:
+            logger.warning(f"No execution plan for task {self.task.id}, using default behavior")
+            return super().generate_next_message(message, state)
         
-        logger.info(f"Tool calls made so far: {tool_calls_made}")
+        # Check if we've completed all steps
+        if state.current_step >= state.total_steps:
+            logger.info(f"All steps completed for task {self.task.id}")
+            # Create a done message
+            done_message = AssistantMessage(
+                role="assistant",
+                content=self.STOP_TOKEN,
+                tool_calls=None
+            )
+            state.messages.append(done_message)
+            return done_message, state
         
-        # Log the full system prompt being used
-        if len(state.messages) == 0:  # First message
-            logger.info(f"System prompt length: {len(self.system_prompt)} chars")
-            logger.debug(f"Full system prompt:\n{self.system_prompt[:500]}...")
-            
-            # Check for any special characters in teaching
-            if self.current_trace:
-                # Extract total steps from trace
-                import re
-                total_match = re.search(r'TOTAL STEPS: (\d+)', self.current_trace)
-                if total_match:
-                    logger.info(f"Total steps to execute: {total_match.group(1)}")
+        # Get the current step from the execution plan
+        current_tool_call = state.execution_plan[state.current_step]
+        logger.info(f"Executing step {state.current_step + 1}: {current_tool_call['name']}")
         
-        # Log tool availability
-        logger.info(f"Available tools: {[tool.name for tool in self.tools]}")
+        # Create a focused prompt that includes only the current step
+        step_instruction = f"""## CURRENT STEP TO EXECUTE
+
+You must execute this specific tool call:
+
+Tool: {current_tool_call['name']}
+Arguments: {json.dumps(current_tool_call['arguments'])}
+
+IMPORTANT: 
+- Use the actual values from the ticket, not the placeholder values shown above
+- Execute ONLY this single tool call
+- Do not add any other tool calls"""
+        
+        # Create a temporary system message with the step instruction
+        focused_system_message = SystemMessage(
+            role="system",
+            content=self.system_prompt + "\n\n" + step_instruction
+        )
+        
+        # Update messages if needed
+        if isinstance(message, MultiToolMessage):
+            state.messages.extend(message.tool_messages)
+        elif message is None:
+            assert len(state.messages) == 0, "Message history should be empty"
+        else:
+            state.messages.append(message)
+        
+        # Generate with focused instruction
+        messages = [focused_system_message] + state.messages
         
         try:
-            result = super().generate_next_message(message, state)
-            logger.info(f"Successfully generated message for task: {self.task.id}")
+            assistant_message = generate(
+                model=self.llm,
+                tools=self.tools,
+                messages=messages,
+                tool_choice="required",
+                **self.llm_args,
+            )
             
-            # Log the generated message details
-            assistant_msg = result[0]
-            if assistant_msg.tool_calls:
-                logger.info(f"Generated tool calls: {[tc.name for tc in assistant_msg.tool_calls]}")
-                logger.info(f"Current progress: Step {tool_calls_made + 1} executed")
-            else:
-                logger.info(f"Generated content: {assistant_msg.content[:100] if assistant_msg.content else 'None'}")
+            if not assistant_message.is_tool_call():
+                raise ValueError("LLMSoloAgent only supports tool calls.")
             
-            return result
+            # Check if it's a stop message
+            assistant_message = self._check_if_stop_toolcall(assistant_message)
+            
+            # Update state
+            state.messages.append(assistant_message)
+            state.current_step += 1
+            
+            # Log progress
+            if assistant_message.tool_calls:
+                logger.info(f"Successfully executed: {[tc.name for tc in assistant_message.tool_calls]}")
+                logger.info(f"Progress: {state.current_step}/{state.total_steps} steps completed")
+            
+            return assistant_message, state
+            
         except Exception as e:
             logger.error(f"Error generating message for task {self.task.id}: {str(e)}")
             raise

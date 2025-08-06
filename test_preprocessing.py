@@ -11,8 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from loguru import logger
 
-def preprocess_teaching_to_json(teaching_content: str) -> str:
-    """Convert teaching content with function calls to structured JSON format."""
+def preprocess_teaching_to_execution_plan(teaching_content: str) -> list:
+    """Convert teaching content to a structured execution plan."""
     import re
     
     # Find all Step N: entries
@@ -55,14 +55,7 @@ def preprocess_teaching_to_json(teaching_content: str) -> str:
             "arguments": {}
         })
     
-    # Create structured output
-    structured_output = "Execute these tool calls in order:\n"
-    for i, tool_call in enumerate(tool_calls):
-        structured_output += f"{i+1}. {json.dumps(tool_call)}\n"
-    
-    structured_output += "\nIMPORTANT: Execute exactly ONE tool call per message. Wait for the tool response before proceeding to the next tool call."
-    
-    return structured_output
+    return tool_calls
 
 
 def test_preprocessing():
@@ -90,7 +83,7 @@ def test_preprocessing():
             teaching_content = full_trace[start_idx:end_idx].strip()
             
             # Preprocess
-            processed = preprocess_teaching_to_json(teaching_content)
+            execution_plan = preprocess_teaching_to_execution_plan(teaching_content)
             
             # Extract the first 500 chars of original for comparison
             original_preview = teaching_content[:500] + "..." if len(teaching_content) > 500 else teaching_content
@@ -99,9 +92,9 @@ def test_preprocessing():
                 "task_id": task_id,
                 "original_teaching": original_preview,
                 "full_original": teaching_content,
-                "processed_output": processed,
-                "length_original": len(teaching_content),
-                "length_processed": len(processed)
+                "execution_plan": execution_plan,
+                "num_steps": len(execution_plan),
+                "length_original": len(teaching_content)
             })
             
             logger.info(f"Processed {task_id}")
@@ -127,8 +120,10 @@ def test_preprocessing():
     for i, result in enumerate(results[:3]):
         print(f"\nTask {i+1}: {result['task_id']}")
         print(f"Original length: {result['length_original']} chars")
-        print(f"Processed length: {result['length_processed']} chars")
-        print(f"\nProcessed output:\n{result['processed_output']}")
+        print(f"Number of steps: {result['num_steps']}")
+        print(f"\nExecution plan:")
+        for j, step in enumerate(result['execution_plan']):
+            print(f"  Step {j+1}: {step['name']}({step['arguments']})")
         print("-" * 80)
 
 
