@@ -33,7 +33,9 @@ from tau2.agent.teacher_student_agent import (
 )
 
 def load_thinking_traces(trace_file: Path) -> Dict[str, str]:
-    """Load pre-generated thinking traces."""
+    """Load pre-generated thinking traces and convert to structured JSON format."""
+    import re
+    
     with open(trace_file) as f:
         data = json.load(f)
     
@@ -46,8 +48,11 @@ def load_thinking_traces(trace_file: Path) -> Dict[str, str]:
             start_idx = full_trace.find("<teaching>") + len("<teaching>")
             end_idx = full_trace.find("</teaching>")
             teaching_content = full_trace[start_idx:end_idx].strip()
-            traces[trace_data["task_id"]] = teaching_content
-            logger.debug(f"Extracted teaching content for {trace_data['task_id']} ({len(teaching_content)} chars)")
+            
+            # Pre-process teaching content to extract function calls
+            processed_content = preprocess_teaching_to_json(teaching_content)
+            traces[trace_data["task_id"]] = processed_content
+            logger.debug(f"Extracted and processed teaching for {trace_data['task_id']} ({len(processed_content)} chars)")
         else:
             # No teaching tag - let model work without teaching
             logger.warning(f"No teaching tag found for {trace_data['task_id']}, skipping trace")
@@ -55,6 +60,60 @@ def load_thinking_traces(trace_file: Path) -> Dict[str, str]:
     
     logger.info(f"Loaded {len(traces)} thinking traces from {trace_file}")
     return traces
+
+
+def preprocess_teaching_to_json(teaching_content: str) -> str:
+    """Convert teaching content with function calls to structured JSON format."""
+    import re
+    
+    # Find all Step N: entries
+    step_pattern = r'Step \d+: ([a-zA-Z_]+)\((.*?)\)'
+    steps = re.findall(step_pattern, teaching_content)
+    
+    tool_calls = []
+    for func_name, args_str in steps:
+        # Parse arguments
+        args_str = args_str.strip()
+        if not args_str:
+            # No arguments
+            args = {}
+        elif args_str.startswith('{'):
+            # JSON-style arguments
+            try:
+                args = json.loads(args_str)
+            except:
+                # If JSON parsing fails, try to extract key-value pairs
+                args = {}
+                logger.warning(f"Failed to parse JSON args: {args_str}")
+        else:
+            # String argument (e.g., "4g_5g_preferred")
+            # Assume it's a mode parameter for network preference
+            if func_name == "set_network_mode_preference":
+                args = {"mode": args_str.strip('"')}
+            else:
+                args = {"value": args_str.strip('"')}
+        
+        tool_call = {
+            "name": func_name,
+            "arguments": args
+        }
+        tool_calls.append(tool_call)
+    
+    # Check if done() is mentioned in completion signal
+    if "done()" in teaching_content.lower() or "completion signal" in teaching_content.lower():
+        tool_calls.append({
+            "name": "done",
+            "arguments": {}
+        })
+    
+    # Create structured output
+    structured_output = "Execute these tool calls in order:\n"
+    for i, tool_call in enumerate(tool_calls):
+        structured_output += f"{i+1}. {json.dumps(tool_call)}\n"
+    
+    structured_output += "\nIMPORTANT: Execute exactly ONE tool call per message. Wait for the tool response before proceeding to the next tool call."
+    
+    return structured_output
 
 def register_custom_agents(thinking_traces: Dict[str, str]):
     """Register our teacher-student agents."""

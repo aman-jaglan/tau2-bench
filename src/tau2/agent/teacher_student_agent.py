@@ -92,40 +92,15 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
         if self.current_trace:
             enhanced_prompt = f"""{base_prompt}
 
-## IMPORTANT: FORMAT TRANSLATION GUIDE
-The teacher's instructions use human-readable function notation. You MUST convert these to proper JSON tool calls:
-
-### Translation Rules:
-1. When you see: function_name()
-   Generate tool call: {{"name": "function_name", "arguments": {{}}}}
-
-2. When you see: function_name({{"key": "value", "key2": "value2"}})
-   Generate tool call: {{"name": "function_name", "arguments": {{"key": "value", "key2": "value2"}}}}
-
-3. When you see: done()
-   Generate tool call: {{"name": "done", "arguments": {{}}}}
-
-### Examples:
-- toggle_airplane_mode() → {{"name": "toggle_airplane_mode", "arguments": {{}}}}
-- grant_app_permission({{"app_name": "messaging", "permission": "sms"}}) → {{"name": "grant_app_permission", "arguments": {{"app_name": "messaging", "permission": "sms"}}}}
-- check_network_status() → {{"name": "check_network_status", "arguments": {{}}}}
-
-### Execution Instructions:
-1. Read each "Step N:" in sequence
-2. Extract ONLY the function call (ignore the "- **Why**:" explanations)
-3. Convert the function call to proper JSON format using the rules above
-4. Generate exactly ONE tool call per step
-5. When you see "Completion Signal" or instructions to call done(), generate the done() tool call
-
 ## TEACHER'S INSTRUCTIONS
+The teacher has analyzed the problem and provided the exact tool calls needed to solve it.
+
 {self.current_trace}
 
 ## YOUR TASK
-Execute the teacher's solution by:
-1. Processing each step sequentially
-2. Converting each function notation to a proper JSON tool call
-3. Ignoring explanatory text (it's for context only)
-4. Calling done() when indicated in the completion signal"""
+You are currently at the beginning. Execute the first tool call listed above. After receiving the tool response, you will be asked to execute the next tool call in the sequence. Continue this process until all tool calls have been executed.
+
+Remember: You can only make ONE tool call per message. The framework will ask you for the next action after each tool response."""
         else:
             enhanced_prompt = base_prompt
             
