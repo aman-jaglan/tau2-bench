@@ -92,13 +92,40 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
         if self.current_trace:
             enhanced_prompt = f"""{base_prompt}
 
-## TEACHER'S INSTRUCTIONS
-Follow these instructions exactly as provided by the teacher:
+## IMPORTANT: FORMAT TRANSLATION GUIDE
+The teacher's instructions use human-readable function notation. You MUST convert these to proper JSON tool calls:
 
+### Translation Rules:
+1. When you see: function_name()
+   Generate tool call: {{"name": "function_name", "arguments": {{}}}}
+
+2. When you see: function_name({{"key": "value", "key2": "value2"}})
+   Generate tool call: {{"name": "function_name", "arguments": {{"key": "value", "key2": "value2"}}}}
+
+3. When you see: done()
+   Generate tool call: {{"name": "done", "arguments": {{}}}}
+
+### Examples:
+- toggle_airplane_mode() → {{"name": "toggle_airplane_mode", "arguments": {{}}}}
+- grant_app_permission({{"app_name": "messaging", "permission": "sms"}}) → {{"name": "grant_app_permission", "arguments": {{"app_name": "messaging", "permission": "sms"}}}}
+- check_network_status() → {{"name": "check_network_status", "arguments": {{}}}}
+
+### Execution Instructions:
+1. Read each "Step N:" in sequence
+2. Extract ONLY the function call (ignore the "- **Why**:" explanations)
+3. Convert the function call to proper JSON format using the rules above
+4. Generate exactly ONE tool call per step
+5. When you see "Completion Signal" or instructions to call done(), generate the done() tool call
+
+## TEACHER'S INSTRUCTIONS
 {self.current_trace}
 
 ## YOUR TASK
-Execute the solution path provided above step by step. Do not deviate from the instructions. The teacher has already analyzed the problem and provided the exact actions needed. Simply execute them in order and call done() when indicated."""
+Execute the teacher's solution by:
+1. Processing each step sequentially
+2. Converting each function notation to a proper JSON tool call
+3. Ignoring explanatory text (it's for context only)
+4. Calling done() when indicated in the completion signal"""
         else:
             enhanced_prompt = base_prompt
             
@@ -110,7 +137,41 @@ Execute the solution path provided above step by step. Do not deviate from the i
         state: LLMAgentState
     ) -> tuple[AssistantMessage, LLMAgentState]:
         """Generate next message using parent's logic - no special processing."""
-        return super().generate_next_message(message, state)
+        # Log the state before generating
+        logger.info(f"=== GENERATING MESSAGE FOR TASK: {self.task.id} ===")
+        logger.info(f"Number of messages in state: {len(state.messages)}")
+        logger.info(f"Message type: {type(message).__name__ if message else 'None'}")
+        
+        # Log the full system prompt being used
+        if len(state.messages) == 0:  # First message
+            logger.info(f"System prompt length: {len(self.system_prompt)} chars")
+            logger.debug(f"Full system prompt:\n{self.system_prompt[:500]}...")
+            
+            # Check for any special characters in teaching
+            if self.current_trace:
+                special_chars = ['```', '"""', "'''", '\\', '\n\n\n']
+                for char in special_chars:
+                    if char in self.current_trace:
+                        logger.warning(f"Teaching contains special sequence: {repr(char)}")
+        
+        # Log tool availability
+        logger.info(f"Available tools: {[tool.name for tool in self.tools]}")
+        
+        try:
+            result = super().generate_next_message(message, state)
+            logger.info(f"Successfully generated message for task: {self.task.id}")
+            
+            # Log the generated message details
+            assistant_msg = result[0]
+            if assistant_msg.tool_calls:
+                logger.info(f"Generated tool calls: {[tc.name for tc in assistant_msg.tool_calls]}")
+            else:
+                logger.info(f"Generated content: {assistant_msg.content[:100] if assistant_msg.content else 'None'}")
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error generating message for task {self.task.id}: {str(e)}")
+            raise
 
 
 class TeacherStudentGTAgent(LLMGTAgent):

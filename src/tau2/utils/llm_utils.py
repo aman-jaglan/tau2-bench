@@ -205,6 +205,20 @@ def generate(
     tools = [tool.openai_schema for tool in tools] if tools else None
     if tools and tool_choice is None:
         tool_choice = "auto"
+    
+    # Log the request details
+    logger.debug(f"=== LLM REQUEST ===")
+    logger.debug(f"Model: {model}")
+    logger.debug(f"Tool choice: {tool_choice}")
+    logger.debug(f"Number of tools: {len(tools) if tools else 0}")
+    logger.debug(f"Number of messages: {len(litellm_messages)}")
+    logger.debug(f"Total prompt tokens (approx): {sum(len(str(m)) for m in litellm_messages) // 4}")
+    
+    # Log if system message is very large
+    for msg in litellm_messages:
+        if msg.get("role") == "system" and len(msg.get("content", "")) > 5000:
+            logger.warning(f"Large system message: {len(msg['content'])} chars")
+    
     try:
         response = completion(
             model=model,

@@ -49,9 +49,9 @@ def load_thinking_traces(trace_file: Path) -> Dict[str, str]:
             traces[trace_data["task_id"]] = teaching_content
             logger.debug(f"Extracted teaching content for {trace_data['task_id']} ({len(teaching_content)} chars)")
         else:
-            # Fallback to full trace if no teaching tag
-            traces[trace_data["task_id"]] = full_trace
-            logger.warning(f"No teaching tag found for {trace_data['task_id']}, using full trace")
+            # No teaching tag - let model work without teaching
+            logger.warning(f"No teaching tag found for {trace_data['task_id']}, skipping trace")
+            # Don't add to traces dict - model will work without teaching
     
     logger.info(f"Loaded {len(traces)} thinking traces from {trace_file}")
     return traces
@@ -119,7 +119,14 @@ def run_objective_1(args):
     solo_tasks = [task for task in solo_tasks if "mms_issue" in task.id]
     logger.info(f"Running {len(solo_tasks)} MMS solo-compatible tasks")
     
-    # Run evaluation
+    # Run evaluation with debug logging
+    logger.info(f"Starting evaluation with {len(solo_tasks)} tasks")
+    
+    # Set debug level for more detailed logs
+    import logging
+    logging.getLogger("tau2.agent.teacher_student_agent").setLevel(logging.DEBUG)
+    logging.getLogger("tau2.utils.llm_utils").setLevel(logging.DEBUG)
+    
     results = run_tasks(
         domain="telecom",
         tasks=solo_tasks,
@@ -271,7 +278,7 @@ def run_objective_3(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Teacher-Student evaluation on τ²-bench")
-    parser.add_argument("--trace-file", type=Path, default="data/teacher_traces/all_traces.json",
+    parser.add_argument("--trace-file", type=Path, default="teacher_traces/all_traces_mms_teaching.json",
                         help="Path to teacher thinking traces")
     parser.add_argument("--student-llm", default="openai/qwen3-student",
                         help="Student model to use (use openai/qwen3-student for local VLLM)")
