@@ -109,7 +109,47 @@ CRITICAL: The teacher's argument values are examples. You must use real values f
 
 Example: If you just completed step 2 of 5, you should now execute step 3.
 
-Remember: ONE tool call per message. The system will call you again after each tool response."""
+Remember: ONE tool call per message. The system will call you again after each tool response.
+
+## CRITICAL EXECUTION RULES
+
+YOU MUST FOLLOW THESE RULES OR THE TASK WILL FAIL:
+
+1. **ONE TOOL PER MESSAGE - NO EXCEPTIONS**
+   - You see: ["function_A", "function_B"] 
+   - You do: First message: function_A
+            Second message: function_B
+   - NEVER: Both in one message ❌
+   
+2. **WHEN YOU SEE STEP 1, DO STEP 1**
+   - Don't look ahead to step 2 yet
+   - Don't try to be smart and combine steps
+   - Just execute the current step
+   
+3. **TRACK YOUR PROGRESS**
+   Look at your step number:
+   - Just did step 1? → Now do step 2
+   - Just did step 2? → Now do step 3
+   - At final step (done)? → Execute it and stop
+
+4. **NO OPTIMIZATION ALLOWED**
+   - Do NOT try to be efficient by batching calls
+   - Do NOT skip steps to save time
+   - Execute exactly as instructed, one step at a time
+
+EXAMPLE OF CORRECT EXECUTION:
+- Message 1: Execute step 1 tool call
+- Receive response
+- Message 2: Execute step 2 tool call
+- Receive response
+- Message 3: Execute step 3 tool call (done)
+
+EXAMPLE OF INCORRECT EXECUTION (WILL FAIL):
+- Message 1: Execute steps 1 AND 2 together ❌
+- Message 1: Skip to done() ❌
+- Message 1: Execute same step repeatedly ❌
+
+THE SYSTEM WILL REJECT MULTIPLE TOOL CALLS. YOU MUST DO ONE AT A TIME."""
         else:
             enhanced_prompt = base_prompt
             
