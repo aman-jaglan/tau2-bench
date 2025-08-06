@@ -92,15 +92,13 @@ class TeacherStudentSoloAgent(LLMSoloAgent):
         if self.current_trace:
             enhanced_prompt = f"""{base_prompt}
 
-## TEACHER'S ANALYSIS
-A teacher has previously analyzed a similar task. Use their thinking to guide your approach:
+## TEACHER'S INSTRUCTIONS
+Follow these instructions exactly as provided by the teacher:
 
 {self.current_trace}
 
 ## YOUR TASK
-Important: The teacher's analysis shows a comprehensive approach, but you should focus on the specific issue in the ticket. Execute only the necessary actions to resolve the ticket requirements, then call done() immediately. Do not continue with extra diagnostic steps once the issue is resolved.
-
-Key instruction: After each action, check if the ticket requirements are met. If yes, call done() without executing additional steps from the teacher's analysis. You can see all previous actions in the conversation history."""
+Execute the solution path provided above step by step. Do not deviate from the instructions. The teacher has already analyzed the problem and provided the exact actions needed. Simply execute them in order and call done() when indicated."""
         else:
             enhanced_prompt = base_prompt
             

@@ -40,7 +40,18 @@ def load_thinking_traces(trace_file: Path) -> Dict[str, str]:
     # Create mapping from task_id to trace
     traces = {}
     for trace_data in data["traces"]:
-        traces[trace_data["task_id"]] = trace_data["thinking_trace"]
+        full_trace = trace_data["thinking_trace"]
+        # Extract only the teaching tag content
+        if "<teaching>" in full_trace and "</teaching>" in full_trace:
+            start_idx = full_trace.find("<teaching>") + len("<teaching>")
+            end_idx = full_trace.find("</teaching>")
+            teaching_content = full_trace[start_idx:end_idx].strip()
+            traces[trace_data["task_id"]] = teaching_content
+            logger.debug(f"Extracted teaching content for {trace_data['task_id']} ({len(teaching_content)} chars)")
+        else:
+            # Fallback to full trace if no teaching tag
+            traces[trace_data["task_id"]] = full_trace
+            logger.warning(f"No teaching tag found for {trace_data['task_id']}, using full trace")
     
     logger.info(f"Loaded {len(traces)} thinking traces from {trace_file}")
     return traces
@@ -103,7 +114,10 @@ def run_objective_1(args):
     
     # Filter for solo-compatible tasks
     solo_tasks = [task for task in tasks if LLMSoloAgent.check_valid_task(task)]
-    logger.info(f"Running {len(solo_tasks)} solo-compatible tasks")
+    
+    # Further filter to only MMS tasks since we only have traces for those
+    solo_tasks = [task for task in solo_tasks if "mms_issue" in task.id]
+    logger.info(f"Running {len(solo_tasks)} MMS solo-compatible tasks")
     
     # Run evaluation
     results = run_tasks(
