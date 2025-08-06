@@ -105,8 +105,9 @@ The teacher has provided a plan. Your job is to execute the current step.
 ## INSTRUCTIONS
 - Execute the SINGLE tool call that will be provided in the state
 - Do NOT add any other tool calls
-- The teacher's argument values are placeholders - use real values from the ticket
 - After you receive the tool's response, the system will provide you with the next step
+
+CRITICAL: The teacher's argument values are examples. You must use real values from the ticket and environment.
 
 ## IMPORTANT
 You will receive ONE step at a time. Execute only that step."""
@@ -175,9 +176,10 @@ Tool: {current_tool_call['name']}
 Arguments: {json.dumps(current_tool_call['arguments'])}
 
 IMPORTANT: 
-- Use the actual values from the ticket, not the placeholder values shown above
 - Execute ONLY this single tool call
-- Do not add any other tool calls"""
+- Do not add any other tool calls
+
+CRITICAL: The arguments shown above are examples. You must use real values from the ticket and environment."""
         
         # Create a temporary system message with the step instruction
         focused_system_message = SystemMessage(
